@@ -53,8 +53,16 @@
 #include "mux.h"
 #include "hsmmc.h"
 #include "board-flash.h"
-#include <linux/input/edt_ft5x06.h>
+#if 1 // SYNERGYS : Touch Screen
+#include <linux/input/ft5x06.h>
+#endif
 #include <mach/board-ti816x.h>
+
+#if 1 // SYNERGYS : Touch Screen
+#define FT5x06_I2C_SLAVEADDRESS  (0x70 >> 1)
+#define OMAP_FT5x06_GPIO         37 /*99*/
+#define OMAP_FT5x06_RESET_GPIO   39 /*46*/
+#endif
 
 static struct omap2_hsmmc_info mmc[] = {
 	{
@@ -238,10 +246,46 @@ static struct platform_device ti816x_gpio_vr_device = {
 	},
 };
 
-static struct edt_ft5x06_platform_data ts_platform_data = {
-    .irq_pin    = 57,
-    .reset_pin  = 58,
+#if 1 // SYNERGYS : Touch Screen
+int  ft5x06_dev_init(int resource)
+{
+    if (resource){
+        omap_mux_init_signal("gpmc_ad13.gpio_37", OMAP_PIN_INPUT | OMAP_PIN_OFF_INPUT_PULLUP |  OMAP_PIN_OFF_WAKEUPENABLE);
+        omap_mux_init_signal("gpmc_ad15.gpio_39", OMAP_PIN_INPUT | OMAP_PIN_OFF_INPUT_PULLUP);
+
+        if (gpio_request(OMAP_FT5x06_RESET_GPIO, "ft5x06_reset") < 0){
+            printk(KERN_ERR "can't get ft5x06 xreset GPIO\n");
+            return -1;
+        }
+
+        if (gpio_request(OMAP_FT5x06_GPIO, "ft5x06_touch") < 0) {
+            printk(KERN_ERR "can't get ft5x06 interrupt GPIO\n");
+            return -1;
+        }
+
+        gpio_direction_input(OMAP_FT5x06_GPIO);
+    } else {
+        gpio_free(OMAP_FT5x06_GPIO);
+        gpio_free(OMAP_FT5x06_RESET_GPIO);
+    }
+
+    return 0;
+}
+#endif
+
+#if 1 // SYNERGYS : Touch Screen
+static struct ft5x06_platform_data ft5x06_platform_data = {
+    .maxx = 600,
+    .maxy = 1024,
+    .flags = 0,
+    .reset_gpio = OMAP_FT5x06_RESET_GPIO,
+    .use_st = FT_USE_ST,
+    .use_mt = FT_USE_MT,
+    .use_trk_id = FT_USE_TRACKING_ID,
+    .use_sleep = FT_USE_SLEEP,
+    .use_gestures = 1,
 };
+#endif
 
 static void __init ti816x_gpio_vr_init(void)
 {
@@ -268,7 +312,6 @@ static struct i2c_board_info __initdata ti816x_i2c_boardinfo0[] = {
 	{
 		I2C_BOARD_INFO("IO Expander", 0x20),
 	},
-
 };
 
 static struct i2c_board_info __initdata ti816x_i2c_boardinfo1[] = {
@@ -284,10 +327,13 @@ static struct i2c_board_info __initdata ti816x_i2c_boardinfo1[] = {
 	{
 		I2C_BOARD_INFO("pcf8575_1", 0x2e),
 	},
+#if 1 // SYNERGYS : Touch Screen
     {
-        I2C_BOARD_INFO("ft5x06", 0x38),
-        .platform_data = &ts_platform_data,
+        I2C_BOARD_INFO(FT_I2C_NAME, FT5x06_I2C_SLAVEADDRESS),
+        .platform_data = &ft5x06_platform_data,
+        .irq = OMAP_GPIO_IRQ(OMAP_FT5x06_GPIO),
     },
+#endif
 };
 
 static struct i2c_client *pcf8575_1_client;
@@ -655,25 +701,6 @@ static struct i2c_driver ti816xevm_cpld_driver = {
 	.probe          = cpld_reg0_probe,
 };
 
-static void __init ti816x_tsc_init(void)
-{
-    int error;
-
-    omap_mux_init_signal("gp1_io25", OMAP_MUX_MODE3);
-
-    error = gpio_request(57, "ts_irq");
-    if (error < 0) {
-        printk(KERN_ERR "%s: failed to request GPIO for TSC IRQ"
-            ": %d\n", __func__, error);
-        return;
-    }
-
-    gpio_direction_input(57);
-    ti816x_i2c_boardinfo1[6].irq = gpio_to_irq(57);
-
-    gpio_export(57, true);
-}
-
 static int __init ti816x_evm_i2c_init(void)
 {
 	omap_register_i2c_bus(1, 100, ti816x_i2c_boardinfo0,
@@ -891,7 +918,6 @@ static void __init ti8168_evm_init(void)
 
 	ti81xx_mux_init(board_mux);
 	omap_serial_init();
-	ti816x_tsc_init();
 	ti816x_evm_i2c_init();
 	i2c_add_driver(&ti816xevm_cpld_driver);
 	ti81xx_register_mcasp(0, &ti8168_evm_snd_data);
